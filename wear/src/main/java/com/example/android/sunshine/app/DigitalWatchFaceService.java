@@ -21,6 +21,8 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.res.Resources;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
 import android.graphics.Paint;
 import android.graphics.Rect;
@@ -46,10 +48,8 @@ import com.google.android.gms.wearable.DataMap;
 import com.google.android.gms.wearable.DataMapItem;
 import com.google.android.gms.wearable.Wearable;
 
-import java.text.SimpleDateFormat;
 import java.util.Calendar;
 import java.util.Date;
-import java.util.Locale;
 import java.util.TimeZone;
 import java.util.concurrent.TimeUnit;
 
@@ -59,6 +59,8 @@ import java.util.concurrent.TimeUnit;
  * mode, the text is drawn without anti-aliasing in ambient mode. On devices which require burn-in
  * protection, the hours are drawn in normal rather than bold. The time is drawn with less contrast
  * and without seconds in mute mode.
+ *
+ * @see <a href="https://github.com/googlesamples/android-WatchFace/blob/master/Wearable/src/main/java/com/example/android/wearable/watchface/DigitalWatchFaceService.java"></a>
  */
 public class DigitalWatchFaceService extends CanvasWatchFaceService {
     private static final String TAG = "DigitalWatchFaceService";
@@ -67,6 +69,11 @@ public class DigitalWatchFaceService extends CanvasWatchFaceService {
             Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD);
     private static final Typeface NORMAL_TYPEFACE =
             Typeface.create(Typeface.SANS_SERIF, Typeface.NORMAL);
+
+    private static final String PATH = "/weather";
+    private static final String KEY_WEATHER_ID = "key_weather_id";
+    private static final String KEY_MAX_TEMP = "key_max_temp";
+    private static final String KEY_MIN_TEMP = "key_min_temp";
 
     /**
      * Update rate in milliseconds for normal (not ambient and not mute) mode. We update twice
@@ -154,9 +161,13 @@ public class DigitalWatchFaceService extends CanvasWatchFaceService {
         float mColonWidth;
         boolean mMute;
 
+        private int mWeatherId;
+        private Bitmap mWeatherIcon;
+        private String mMaxTemp = "01";
+        private String mMinTemp = "00";
+
         Calendar mCalendar;
         Date mDate;
-        SimpleDateFormat mDayOfWeekFormat;
         java.text.DateFormat mDateFormat;
 
         boolean mShouldDrawColons;
@@ -210,6 +221,9 @@ public class DigitalWatchFaceService extends CanvasWatchFaceService {
             mCalendar = Calendar.getInstance();
             mDate = new Date();
             initFormats();
+
+            mWeatherIcon = BitmapFactory.decodeResource(getResources(),
+                    R.mipmap.ic_launcher);
         }
 
         @Override
@@ -260,8 +274,6 @@ public class DigitalWatchFaceService extends CanvasWatchFaceService {
         }
 
         private void initFormats() {
-            mDayOfWeekFormat = new SimpleDateFormat("EEEE", Locale.getDefault());
-            mDayOfWeekFormat.setCalendar(mCalendar);
             mDateFormat = DateFormat.getDateFormat(DigitalWatchFaceService.this);
             mDateFormat.setCalendar(mCalendar);
         }
@@ -501,14 +513,10 @@ public class DigitalWatchFaceService extends CanvasWatchFaceService {
             // Only render the day of week and date if there is no peek card, so they do not bleed
             // into each other in ambient mode.
             if (getPeekCardPosition().isEmpty()) {
-                // Day of week
-                canvas.drawText(
-                        mDayOfWeekFormat.format(mDate),
-                        mXOffset, mYOffset + mLineHeight, mDatePaint);
-                // Date
-                canvas.drawText(
-                        mDateFormat.format(mDate),
-                        mXOffset, mYOffset + mLineHeight * 2, mDatePaint);
+                canvas.drawBitmap(mWeatherIcon, mXOffset, mYOffset + 60, new Paint());
+                canvas.drawText( mDateFormat.format(mDate), mXOffset, mYOffset + mLineHeight, mDatePaint);
+                canvas.drawText(mMaxTemp + " " + mMinTemp, mXOffset + mWeatherIcon.getWidth() + 15,
+                        60+ mYOffset + mWeatherIcon.getHeight()/2, mDatePaint);
             }
         }
 
@@ -569,24 +577,30 @@ public class DigitalWatchFaceService extends CanvasWatchFaceService {
 
         @Override // DataApi.DataListener
         public void onDataChanged(DataEventBuffer dataEvents) {
-            for (DataEvent dataEvent : dataEvents) {
-                if (dataEvent.getType() != DataEvent.TYPE_CHANGED) {
-                    continue;
+            for (DataEvent event : dataEvents) {
+                if (event.getType() == DataEvent.TYPE_CHANGED) {
+                    // DataItem changed
+                    DataItem item = event.getDataItem();
+                    if (item.getUri().getPath().compareTo(PATH) == 0) {
+                        DataMap dataMap = DataMapItem.fromDataItem(item).getDataMap();
+                        mWeatherId = dataMap.getInt(KEY_WEATHER_ID);
+                        if (mWeatherId != 0) {
+                            mWeatherIcon = BitmapFactory.decodeResource(getResources(),
+                                    DigitalWatchFaceUtil.getIconResourceForWeatherCondition(mWeatherId));
+                        }
+                        if (mWeatherIcon == null) {
+                            mWeatherIcon = BitmapFactory.decodeResource(getResources(),
+                                    R.mipmap.ic_launcher);
+                        }
+                        mMaxTemp = dataMap.getString(KEY_MAX_TEMP);
+                        mMinTemp = dataMap.getString(KEY_MIN_TEMP);
+                    }
+                } else if (event.getType() == DataEvent.TYPE_DELETED) {
+                    // DataItem deleted
                 }
-
-                DataItem dataItem = dataEvent.getDataItem();
-                if (!dataItem.getUri().getPath().equals(
-                        DigitalWatchFaceUtil.PATH_WITH_FEATURE)) {
-                    continue;
-                }
-
-                DataMapItem dataMapItem = DataMapItem.fromDataItem(dataItem);
-                DataMap config = dataMapItem.getDataMap();
-                if (Log.isLoggable(TAG, Log.DEBUG)) {
-                    Log.d(TAG, "Config DataItem updated:" + config);
-                }
-                updateUiForConfigDataMap(config);
+                //updateUiForConfigDataMap();
             }
+
         }
 
         private void updateUiForConfigDataMap(final DataMap config) {
